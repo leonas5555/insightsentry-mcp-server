@@ -62,13 +62,17 @@ async function run() {
 
   const tools = await discoverTools();
 
+  // Filter out WebSocket specific tools
+  const excludedToolNames = ['connect_news_feed', 'connect_real_time_data_stream'];
+  const filteredTools = tools.filter(tool => !excludedToolNames.includes(tool.definition.function.name));
+
   server.setRequestHandler(ListToolsRequestSchema, async () => ({
-    tools: await transformTools(tools),
+    tools: await transformTools(filteredTools),
   }));
 
   server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const toolName = request.params.name;
-    const tool = tools.find((t) => t.definition.function.name === toolName);
+    const tool = filteredTools.find((t) => t.definition.function.name === toolName);
 
     if (!tool) {
       throw new McpError(ErrorCode.MethodNotFound, `Unknown tool: ${toolName}`);

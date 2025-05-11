@@ -5,13 +5,16 @@
   "main": "index.js",
   "type": "module",
   "scripts": {
-    "list-tools": "node index.js tools"
+    "list-tools": "node index.js tools",
+    "start": "concurrently \"node mcpServer.js --sse\" \"node streamingServer.js\""
   },
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.9.0",
     "commander": "^13.1.0",
+    "concurrently": "^8.2.2",
     "dotenv": "^16.4.7",
-    "express": "^5.1.0"
+    "express": "^5.1.0",
+    "ws": "^8.18.0"
   },
   "engines": {
     "node": ">=16.0.0"
