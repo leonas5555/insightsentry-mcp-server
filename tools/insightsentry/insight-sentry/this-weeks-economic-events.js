@@ -4,7 +4,7 @@
  * @returns {Promise<Object>} - The result of the economic events retrieval.
  */
 const executeFunction = async () => {
-  const baseUrl = 'https://insightsentry.p.rapidapi.com';
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL for the request

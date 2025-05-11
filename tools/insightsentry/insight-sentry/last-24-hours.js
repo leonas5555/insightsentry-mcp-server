@@ -7,8 +7,8 @@
  * @param {string} [args.keywords] - Optional keywords to filter news items by title or content.
  * @returns {Promise<Object>} - The result of the news feed retrieval.
  */
-const executeFunction = async ({ limit = 5000, page = 1, keywords }) => {
-  const baseUrl = ''; // will be provided by the user
+const executeFunction = async ({ keywords = '', limit = 20, page = 1 }) => {
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with query parameters

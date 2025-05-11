@@ -4,11 +4,11 @@
  * @returns {Promise<WebSocket>} - The WebSocket connection to the news feed.
  */
 const executeFunction = async () => {
-  const url = 'wss://newsfeed.insightsentry.com/newsfeed';
+  const wsUrl = process.env.INSIGHTSENTRY_WS_URL || 'wss://newsfeed.insightsentry.com/newsfeed';
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
 
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
       // Send authentication message upon connection

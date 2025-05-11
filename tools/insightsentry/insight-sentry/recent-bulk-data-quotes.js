@@ -6,7 +6,7 @@
  * @returns {Promise<Object>} - The performance-related information of all stocks from the specified exchange.
  */
 const executeFunction = async ({ exchange }) => {
-  const baseUrl = ''; // will be provided by the user
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with the exchange path variable

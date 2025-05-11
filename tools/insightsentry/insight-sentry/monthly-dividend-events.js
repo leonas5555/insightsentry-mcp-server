@@ -5,8 +5,8 @@
  * @param {string} [args.month='this'] - The month for which to retrieve dividend events.
  * @returns {Promise<Array>} - The list of monthly dividend events.
  */
-const executeFunction = async ({ month = 'this' }) => {
-  const baseUrl = ''; // will be provided by the user
+const executeFunction = async ({ month = '' }) => {
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with query parameters

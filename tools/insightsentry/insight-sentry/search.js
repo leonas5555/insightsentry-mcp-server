@@ -7,7 +7,7 @@
  * @returns {Promise<Object>} - The result of the stock search.
  */
 const executeFunction = async ({ query, type = 'stocks' }) => {
-  const baseUrl = 'https://insightsentry.p.rapidapi.com';
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with query parameters

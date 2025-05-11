@@ -4,11 +4,11 @@
  * @returns {Promise<void>} - A promise that resolves when the connection is established.
  */
 const executeFunction = async () => {
-  const url = 'wss://realtime.insightsentry.com/live';
+  const wsUrl = process.env.INSIGHTSENTRY_WS_URL || 'wss://stream.insightsentry.com/quote';
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
 
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(url);
+    const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
       console.log('WebSocket connection established.');

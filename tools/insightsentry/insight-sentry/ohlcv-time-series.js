@@ -10,8 +10,8 @@
  * @param {boolean} [args.badj=true] - Whether to apply back-adjustment for continuous futures contracts.
  * @returns {Promise<Object>} - The latest series data for the specified symbol.
  */
-const executeFunction = async ({ symbol, bar_type = 'second', bar_interval = 1, extended = true, dadj = false, badj = true }) => {
-  const baseUrl = ''; // will be provided by the user
+const executeFunction = async ({ symbol, bar_type = 'day', bar_interval = 1, extended = false, dadj = false, badj = false }) => {
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with query parameters

@@ -6,7 +6,7 @@
  * @returns {Promise<Object>} - The result of the quote request.
  */
 const executeFunction = async ({ codes }) => {
-  const baseUrl = 'https://insightsentry.p.rapidapi.com';
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   
   if (!Array.isArray(codes) || codes.length > 10) {

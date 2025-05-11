@@ -6,7 +6,7 @@
  * @returns {Promise<Object>} - The result of the symbol information retrieval.
  */
 const executeFunction = async ({ symbol }) => {
-  const baseUrl = ''; // will be provided by the user
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with the symbol path variable

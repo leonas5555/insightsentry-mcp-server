@@ -46,6 +46,18 @@ const apiKey = process.env.ACME_API_KEY;
 
 **Caveat:** This may not be correct for every API. The generation logic is relatively simple - for each workspace, we create an environment variable with the same name as the workspace slug, and then use that environment variable in each tool file that belongs to that workspace. If this isn't the right behavior for your chosen API, no problem! You can manually update anything in the `.env` file or tool files to accurately reflect the API's method of authentication.
 
+In the `.env` file, add the following environment variables for InsightSentry tools:
+
+```
+INSIGHTSENTRY_API_KEY=your_api_key_here
+INSIGHTSENTRY_BASE_URL=https://insightsentry.p.rapidapi.com
+INSIGHTSENTRY_WS_URL=wss://stream.insightsentry.com/quote
+```
+
+The `INSIGHTSENTRY_API_KEY` is your RapidAPI key for accessing the InsightSentry API.
+The `INSIGHTSENTRY_BASE_URL` is the base URL for REST API endpoints.
+The `INSIGHTSENTRY_WS_URL` is the WebSocket URL for real-time data streams.
+
 ### 🛠️ List Available Tools
 
 List descriptions and parameters from all generated tools with:

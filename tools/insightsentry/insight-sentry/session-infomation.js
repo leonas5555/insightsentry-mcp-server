@@ -6,7 +6,7 @@
  * @returns {Promise<Object>} - The session information for the specified stock symbol.
  */
 const executeFunction = async ({ symbol }) => {
-  const baseUrl = 'https://insightsentry.p.rapidapi.com';
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with the symbol path variable

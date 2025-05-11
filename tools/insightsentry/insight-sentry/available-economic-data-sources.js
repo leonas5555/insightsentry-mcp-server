@@ -4,7 +4,7 @@
  * @returns {Promise<Object>} - The result of the API call containing economic data sources.
  */
 const executeFunction = async () => {
-  const baseUrl = ''; // will be provided by the user
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL for the API request

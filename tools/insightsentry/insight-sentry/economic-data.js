@@ -6,7 +6,7 @@
  * @returns {Promise<Object>} - The historical series data for the specified economic indicator.
  */
 const executeFunction = async ({ id }) => {
-  const baseUrl = ''; // will be provided by the user
+  const baseUrl = process.env.INSIGHTSENTRY_BASE_URL;
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
   try {
     // Construct the URL with the path variable
