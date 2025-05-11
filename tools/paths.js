@@ -1,0 +1,22 @@
+export const toolPaths = [
+  'insightsentry/insight-sentry/news-feed-live-streaming.js',
+  'insightsentry/insight-sentry/real-time-data-streaming.js',
+  'insightsentry/insight-sentry/available-exchanges.js',
+  'insightsentry/insight-sentry/available-economic-data-sources.js',
+  'insightsentry/insight-sentry/monthly-dividend-events.js',
+  'insightsentry/insight-sentry/recent-bulk-data-metrics.js',
+  'insightsentry/insight-sentry/available-data-sources.js',
+  'insightsentry/insight-sentry/recent-bulk-data-quotes.js',
+  'insightsentry/insight-sentry/symbol-information.js',
+  'insightsentry/insight-sentry/l-1-quote.js',
+  'insightsentry/insight-sentry/session-infomation.js',
+  'insightsentry/insight-sentry/search.js',
+  'insightsentry/insight-sentry/this-weeks-economic-events.js',
+  'insightsentry/insight-sentry/last-100.js',
+  'insightsentry/insight-sentry/economic-data.js',
+  'insightsentry/insight-sentry/economic-events-history.js',
+  'insightsentry/insight-sentry/last-24-hours.js',
+  'insightsentry/insight-sentry/bulk-l-1-quotes.js',
+  'insightsentry/insight-sentry/ohlcv-time-series.js',
+  'insightsentry/insight-sentry/financial-data.js'
+];
