@@ -1,28 +1,57 @@
 /**
  * Function to connect to the Live Streaming News Feed via WebSocket.
  *
+ * @param {Object} params - Parameters for the connection
+ * @param {Array<string>} [params.symbols] - Array of symbols to filter news for
+ * @param {Array<string>} [params.keywords] - Array of keywords to filter news for
  * @returns {Promise<WebSocket>} - The WebSocket connection to the news feed.
  */
-const executeFunction = async () => {
+const executeFunction = async (params = {}) => {
   const wsUrl = process.env.INSIGHTSENTRY_WS_URL || 'wss://newsfeed.insightsentry.com/newsfeed';
   const apiKey = process.env.INSIGHTSENTRY_API_KEY;
+  const { symbols, keywords } = params;
 
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
+      console.log('[NewsFeedTool] WebSocket connection established. Authenticating...');
       // Send authentication message upon connection
       socket.send(JSON.stringify({ api_key: apiKey }));
+      
+      // Apply filters if provided
+      if (symbols && symbols.length > 0) {
+        console.log(`[NewsFeedTool] Setting symbol filter: ${symbols.join(', ')}`);
+        socket.send(JSON.stringify({ 
+          type: 'filter_symbols', 
+          symbols: symbols 
+        }));
+      }
+      
+      if (keywords && keywords.length > 0) {
+        console.log(`[NewsFeedTool] Setting keyword filter: ${keywords.join(', ')}`);
+        socket.send(JSON.stringify({ 
+          type: 'filter_keywords', 
+          keywords: keywords 
+        }));
+      }
+      
+      console.log('[NewsFeedTool] Authentication and filters complete.');
       resolve(socket);
     };
 
+    socket.onmessage = (event) => {
+      console.log('[NewsFeedTool] Message from news feed:', event.data);
+      // Handle incoming messages here (if needed)
+    };
+
     socket.onerror = (error) => {
-      console.error('WebSocket error:', error);
+      console.error('[NewsFeedTool] WebSocket error:', error);
       reject(new Error('WebSocket connection error.'));
     };
 
     socket.onclose = (event) => {
-      console.log('WebSocket closed:', event);
+      console.log('[NewsFeedTool] WebSocket closed:', event);
     };
   });
 };
@@ -40,7 +69,22 @@ const apiTool = {
       description: 'Connect to the Live Streaming News Feed via WebSocket.',
       parameters: {
         type: 'object',
-        properties: {},
+        properties: {
+          symbols: {
+            type: 'array',
+            items: {
+              type: 'string'
+            },
+            description: 'Array of symbols to filter news for (e.g., ["AAPL", "MSFT"])'
+          },
+          keywords: {
+            type: 'array',
+            items: {
+              type: 'string'
+            },
+            description: 'Array of keywords to filter news for (e.g., ["earnings", "merger"])'
+          }
+        },
         required: []
       }
     }

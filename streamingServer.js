@@ -32,17 +32,34 @@ const wss = new WebSocketServer({ server });
 console.log(`[Streaming Server] WebSocket server started on port ${PORT}`);
 
 wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, `ws://${req.headers.host}`);
-  const toolName = url.pathname.substring(1); // Remove leading '/'
+  const requestUrl = new URL(req.url, `ws://${req.headers.host}`);
+  const toolName = requestUrl.pathname.substring(1); // Remove leading '/'
+  
+  // Parse query parameters
+  const queryParams = {};
+  for (const [key, value] of requestUrl.searchParams) {
+    // Basic parsing for parameters
+    if (key === 'symbols' || key === 'keywords') {
+      // Handle array parameters
+      try {
+        queryParams[key] = JSON.parse(value);
+      } catch (e) {
+        // If not valid JSON, treat as a single-item array
+        queryParams[key] = [value];
+      }
+    } else {
+      queryParams[key] = value;
+    }
+  }
 
-  console.log(`[Streaming Server] Client connected for tool: ${toolName}`);
+  console.log(`[Streaming Server] Client connected for tool: ${toolName} with params:`, queryParams);
 
-  let toolFunction;
+  let toolModule;
 
   if (toolName === newsFeedTool.definition.function.name) {
-    toolFunction = newsFeedTool.function;
+    toolModule = newsFeedTool;
   } else if (toolName === realTimeDataTool.definition.function.name) {
-    toolFunction = realTimeDataTool.function;
+    toolModule = realTimeDataTool;
   } else {
     console.log(`[Streaming Server] Unknown tool: ${toolName}. Closing connection.`);
     ws.send(JSON.stringify({ error: `Unknown tool: ${toolName}` }));
@@ -50,11 +67,10 @@ wss.on("connection", (ws, req) => {
     return;
   }
 
-  // Execute the tool function, which should return a WebSocket instance or handle streaming
-  toolFunction()
+  // Execute the tool function with parameters
+  toolModule.function(queryParams)
     .then(clientSocket => {
       if (clientSocket && clientSocket instanceof WebSocket) {
-        // If the tool returns a WebSocket, pipe messages
         console.log(`[Streaming Server] Piping messages for tool: ${toolName}`);
 
         // Forward messages from the target WebSocket to the client
@@ -91,21 +107,12 @@ wss.on("connection", (ws, req) => {
           }
         };
       } else {
-        // If the tool function handles streaming internally or doesn't return a WebSocket
-        // (e.g., realTimeDataTool resolves without returning a socket in the provided example)
-        // We assume it sets up its own streaming.
-        // The current realTimeDataTool logs messages but doesn't directly stream back to the client via this server.
-        // This part might need adjustment based on how `realTimeDataTool.function` is intended to stream.
-        // For now, we'll just keep the connection open and log.
-        console.log(`[Streaming Server] Tool ${toolName} executed. It should handle its own streaming or logging.`);
-         ws.send(JSON.stringify({ message: `Connected to ${toolName}. It handles its own streaming/logging.`}));
-
-        // Keep connection open, but it might be closed by the client if no data is received.
-        // Or the tool itself (e.g. realTimeDataTool) might need to be modified to send data via `ws`.
+        console.log(`[Streaming Server] Tool ${toolName} executed but did not return a manageable WebSocket. This path should ideally not be hit if tools are updated.`);
+        ws.send(JSON.stringify({ message: `Connected to ${toolName}. It should handle its own streaming or was expected to return a WebSocket.`}));
       }
     })
     .catch(error => {
-      console.error(`[Streaming Server] Error executing tool ${toolName}:`, error);
+      console.error(`[Streaming Server] Error executing tool ${toolName} with params ${JSON.stringify(queryParams)}:`, error);
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ error: `Error executing tool ${toolName}: ${error.message}` }));
         ws.close(1011, `Error executing tool ${toolName}`);
