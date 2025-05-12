@@ -4,12 +4,16 @@
  * @param {Object} params - Parameters for the connection
  * @param {Array<string>} [params.symbols] - Array of symbols to filter news for
  * @param {Array<string>} [params.keywords] - Array of keywords to filter news for
+ * @param {string} params.websocketKey - WebSocket API key (required, distinct from REST API key)
  * @returns {Promise<WebSocket>} - The WebSocket connection to the news feed.
  */
 const executeFunction = async (params = {}) => {
-  const wsUrl = process.env.INSIGHTSENTRY_WS_URL || 'wss://newsfeed.insightsentry.com/newsfeed';
-  const apiKey = process.env.INSIGHTSENTRY_API_KEY;
-  const { symbols, keywords } = params;
+  const wsUrl = 'wss://newsfeed.insightsentry.com/newsfeed';
+  const { symbols, keywords, websocketKey } = params;
+
+  if (!websocketKey) {
+    return Promise.reject(new Error('websocketKey parameter is required for news feed streaming.'));
+  }
 
   return new Promise((resolve, reject) => {
     const socket = new WebSocket(wsUrl);
@@ -17,7 +21,7 @@ const executeFunction = async (params = {}) => {
     socket.onopen = () => {
       console.log('[NewsFeedTool] WebSocket connection established. Authenticating...');
       // Send authentication message upon connection
-      socket.send(JSON.stringify({ api_key: apiKey }));
+      socket.send(JSON.stringify({ api_key: websocketKey }));
       
       // Apply filters if provided
       if (symbols && symbols.length > 0) {
@@ -66,7 +70,7 @@ const apiTool = {
     type: 'function',
     function: {
       name: 'connect_news_feed',
-      description: 'Connect to the Live Streaming News Feed via WebSocket.',
+      description: 'Connect to the Live Streaming News Feed via WebSocket. Requires a WebSocket API key.',
       parameters: {
         type: 'object',
         properties: {
@@ -83,9 +87,13 @@ const apiTool = {
               type: 'string'
             },
             description: 'Array of keywords to filter news for (e.g., ["earnings", "merger"])'
+          },
+          websocketKey: {
+            type: 'string',
+            description: 'WebSocket API key (required, distinct from REST API key)'
           }
         },
-        required: []
+        required: ['websocketKey']
       }
     }
   }
