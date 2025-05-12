@@ -2,19 +2,16 @@
  * Function to connect to the Real-Time Data Feed for Series or Quote type data via WebSocket.
  *
  * @param {Object} params - Parameters for the connection
- * @param {string} params.symbol - Symbol to stream data for
- * @param {string} [params.interval='1Min'] - Time interval for data
- * @param {boolean} [params.dadj=false] - Apply dividend adjustment to price series
- * @param {boolean} [params.recent_bars=false] - Include up to 15 recent bars on connect
+ * @param {Array<Object>} params.subscriptions - Array of subscription objects, each with {code, type, bar_type, bar_interval}
  * @param {string} params.websocketKey - WebSocket API key (required, distinct from REST API key)
  * @returns {Promise<WebSocket>} - A promise that resolves with the WebSocket connection
  */
 const executeFunction = async (params = {}) => {
   const wsUrl = 'wss://realtime.insightsentry.com/live';
-  const { symbol, interval = '1Min', dadj = false, recent_bars = false, websocketKey } = params;
-  
-  if (!symbol) {
-    return Promise.reject(new Error('Symbol parameter is required for real-time data stream.'));
+  const { subscriptions, websocketKey } = params;
+
+  if (!subscriptions) {
+    return Promise.reject(new Error('subscriptions array is required for real-time data stream.'));
   }
   if (!websocketKey) {
     return Promise.reject(new Error('websocketKey parameter is required for real-time data stream.'));
@@ -24,28 +21,23 @@ const executeFunction = async (params = {}) => {
     const socket = new WebSocket(wsUrl);
 
     socket.onopen = () => {
-      console.log(`[RealTimeDataTool] WebSocket connection established for ${symbol}. Subscribing...`);
+      console.log(`[RealTimeDataTool] WebSocket connection established. Subscribing...`);
       // Send authentication message upon connection
-      socket.send(JSON.stringify({ 
-        type: 'auth', 
-        api_key: websocketKey 
-      }));
-      
-      // Send subscription message with symbol, interval, dadj, and recent_bars
+      socket.send(
+        JSON.stringify({
+          type: 'auth',
+          api_key: websocketKey
+        })
+      );
+
+      // Send unified subscriptions message
       const subscriptionMessage = {
-        type: 'subscribe',
-        code: symbol, // 'code' is the expected field for symbol
-        bar_type: interval.toLowerCase().replace('min', 'm').replace('h', 'h').replace('d', 'd'),
-        dadj: dadj,
-        recent_bars: recent_bars
+        api_key: websocketKey,
+        subscriptions: subscriptions
       };
-      // Remove undefined or default fields
-      if (!dadj) delete subscriptionMessage.dadj;
-      if (!recent_bars) delete subscriptionMessage.recent_bars;
-      if (!interval || interval === '1Min') delete subscriptionMessage.bar_type;
       socket.send(JSON.stringify(subscriptionMessage));
-      console.log(`[RealTimeDataTool] Subscription message sent for ${symbol}:`, subscriptionMessage);
-      
+      console.log(`[RealTimeDataTool] Subscriptions message sent:`, subscriptionMessage);
+
       // Resolve with the socket instance
       resolve(socket);
     };
@@ -55,26 +47,26 @@ const executeFunction = async (params = {}) => {
         const data = JSON.parse(event.data);
         if (data.series) {
           // Bar series response
-          console.log(`[RealTimeDataTool] Bar series for ${symbol}:`, data);
+          console.log(`[RealTimeDataTool] Bar series:`, data);
         } else if (data.last_price !== undefined) {
           // Quote response
-          console.log(`[RealTimeDataTool] Quote for ${symbol}:`, data);
+          console.log(`[RealTimeDataTool] Quote:`, data);
         } else {
           // Other message
-          console.log(`[RealTimeDataTool] Message for ${symbol}:`, data);
+          console.log(`[RealTimeDataTool] Message:`, data);
         }
       } catch (e) {
-        console.log(`[RealTimeDataTool] Non-JSON message for ${symbol}:`, event.data);
+        console.log(`[RealTimeDataTool] Non-JSON message:`, event.data);
       }
     };
 
     socket.onerror = (error) => {
-      console.error(`[RealTimeDataTool] WebSocket error for ${symbol}:`, error);
+      console.error(`[RealTimeDataTool] WebSocket error:`, error);
       reject(error);
     };
 
     socket.onclose = () => {
-      console.log(`[RealTimeDataTool] WebSocket connection closed for ${symbol}.`);
+      console.log(`[RealTimeDataTool] WebSocket connection closed.`);
     };
   });
 };
@@ -89,35 +81,34 @@ const apiTool = {
     type: 'function',
     function: {
       name: 'connect_real_time_data_stream',
-      description: 'Connect to the Real-Time Data Feed for Series or Quote type data via WebSocket. Supports dividend adjustment and initial bar history. Requires a WebSocket API key.',
+      description:
+        'Connect to the Real-Time Data Feed for Series or Quote type data via WebSocket. Supports multiple symbol subscriptions. Requires a WebSocket API key.',
       parameters: {
         type: 'object',
         properties: {
-          symbol: {
-            type: 'string',
-            description: 'Symbol to stream data for (e.g., AAPL)'
-          },
-          interval: {
-            type: 'string',
-            description: 'Time interval for data (e.g., 1Min, 5Min, 15Min, 1H, 1D)',
-            default: '1Min'
-          },
-          dadj: {
-            type: 'boolean',
-            description: 'Apply dividend adjustment to all price values',
-            default: false
-          },
-          recent_bars: {
-            type: 'boolean',
-            description: 'Include up to 15 most recent complete bars with the initial response',
-            default: false
+          subscriptions: {
+            type: 'array',
+            description:
+              'Array of subscription objects, each with {code, type, bar_type, bar_interval}. Example: [{"code": "NASDAQ:AAPL", "type": "series", "bar_type": "minute", "bar_interval": 1}, {"code": "NASDAQ:TSLA", "type": "quote"}]',
+            items: {
+              type: 'object',
+              properties: {
+                code: { type: 'string', description: 'Symbol code (e.g., NASDAQ:AAPL)' },
+                type: { type: 'string', enum: ['series', 'quote'], description: 'Subscription type: series or quote' },
+                bar_type: { type: 'string', description: 'Bar type for series (e.g., minute, hour, day)' },
+                bar_interval: { type: 'integer', description: 'Bar interval for series (e.g., 1 for 1-minute bars)' },
+                dadj: { type: 'boolean', description: 'Apply dividend adjustment to all price values' },
+                recent_bars: { type: 'boolean', description: 'Include up to 15 most recent complete bars with the initial response' }
+              },
+              required: ['code', 'type']
+            }
           },
           websocketKey: {
             type: 'string',
             description: 'WebSocket API key (required, distinct from REST API key)'
           }
         },
-        required: ['symbol', 'websocketKey']
+        required: ['subscriptions', 'websocketKey']
       }
     }
   }
