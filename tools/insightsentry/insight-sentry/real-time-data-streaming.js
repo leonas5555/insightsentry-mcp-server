@@ -27,6 +27,7 @@ const executeFunction = async (params = {}) => {
   let shouldReconnect = true;
   let lastDataTimestamp = Date.now();
   let dataGapInterval = null;
+  let pingInterval = null;
 
   function startDataGapMonitor() {
     if (dataGapInterval) clearInterval(dataGapInterval);
@@ -68,13 +69,30 @@ const executeFunction = async (params = {}) => {
         console.log(`[RealTimeDataTool] Subscriptions message sent:`, subscriptionMessage);
         lastDataTimestamp = Date.now();
         startDataGapMonitor();
+        // Start ping keep-alive
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, 20000);
         resolve(ws);
       };
 
       ws.onmessage = (event) => {
         lastDataTimestamp = Date.now();
+        // Heartbeat/keep-alive handling
+        if (event.data === 'pong') {
+          console.log('[RealTimeDataTool] Received pong from server');
+          return;
+        }
         try {
           const data = JSON.parse(event.data);
+          if (data && data.server_time) {
+            // Server heartbeat message
+            // Optionally log or update lastDataTimestamp
+            return;
+          }
           let dataTimestamp = null;
           if (data.series && data.series.t) {
             // Bar series: assume 't' is UNIX timestamp in seconds
@@ -106,6 +124,8 @@ const executeFunction = async (params = {}) => {
 
       ws.onclose = (event) => {
         stopDataGapMonitor();
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = null;
         if (!shouldReconnect) return;
         console.log(`[RealTimeDataTool] WebSocket connection closed (code: ${event.code}, reason: ${event.reason}). Reconnecting in ${reconnectDelay / 1000}s...`);
         setTimeout(() => {

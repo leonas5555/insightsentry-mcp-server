@@ -7,6 +7,11 @@
  * @param {string} params.websocketKey - WebSocket API key (required, distinct from REST API key)
  * @returns {Promise<WebSocket>} - The WebSocket connection to the news feed.
  */
+const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
+const MAX_RECONNECT_DELAY = 10000; // 10 seconds
+const STALE_NEWS_THRESHOLD_MS = 10000; // 10 seconds
+const DATA_GAP_ALERT_THRESHOLD_MS = 30000; // 30 seconds
+
 const executeFunction = async (params = {}) => {
   const wsUrl = 'wss://newsfeed.insightsentry.com/newsfeed';
   const { symbols, keywords, websocketKey } = params;
@@ -15,48 +20,115 @@ const executeFunction = async (params = {}) => {
     return Promise.reject(new Error('websocketKey parameter is required for news feed streaming.'));
   }
 
+  let ws;
+  let reconnectDelay = INITIAL_RECONNECT_DELAY;
+  let shouldReconnect = true;
+  let lastNewsTimestamp = Date.now();
+  let dataGapInterval = null;
+  let pingInterval = null;
+
+  function startDataGapMonitor() {
+    if (dataGapInterval) clearInterval(dataGapInterval);
+    dataGapInterval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastNewsTimestamp > DATA_GAP_ALERT_THRESHOLD_MS) {
+        console.warn(`[NewsFeedTool] WARNING: No news received for over ${DATA_GAP_ALERT_THRESHOLD_MS / 1000}s! Possible data gap.`);
+      }
+    }, 5000);
+  }
+
+  function stopDataGapMonitor() {
+    if (dataGapInterval) {
+      clearInterval(dataGapInterval);
+      dataGapInterval = null;
+    }
+  }
+
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(wsUrl);
+    function connect() {
+      ws = new WebSocket(wsUrl);
 
-    socket.onopen = () => {
-      console.log('[NewsFeedTool] WebSocket connection established. Authenticating...');
-      // Send authentication message upon connection
-      socket.send(JSON.stringify({ api_key: websocketKey }));
-      
-      // Apply filters if provided
-      if (symbols && symbols.length > 0) {
-        console.log(`[NewsFeedTool] Setting symbol filter: ${symbols.join(', ')}`);
-        socket.send(JSON.stringify({ 
-          type: 'filter_symbols', 
-          symbols: symbols 
-        }));
-      }
-      
-      if (keywords && keywords.length > 0) {
-        console.log(`[NewsFeedTool] Setting keyword filter: ${keywords.join(', ')}`);
-        socket.send(JSON.stringify({ 
-          type: 'filter_keywords', 
-          keywords: keywords 
-        }));
-      }
-      
-      console.log('[NewsFeedTool] Authentication and filters complete.');
-      resolve(socket);
-    };
+      ws.onopen = () => {
+        console.log('[NewsFeedTool] WebSocket connection established. Authenticating...');
+        reconnectDelay = INITIAL_RECONNECT_DELAY; // Reset delay on successful connect
+        // Send authentication message upon connection
+        ws.send(JSON.stringify({ api_key: websocketKey }));
+        // Apply filters if provided
+        if (symbols && symbols.length > 0) {
+          console.log(`[NewsFeedTool] Setting symbol filter: ${symbols.join(', ')}`);
+          ws.send(JSON.stringify({ 
+            type: 'filter_symbols', 
+            symbols: symbols 
+          }));
+        }
+        if (keywords && keywords.length > 0) {
+          console.log(`[NewsFeedTool] Setting keyword filter: ${keywords.join(', ')}`);
+          ws.send(JSON.stringify({ 
+            type: 'filter_keywords', 
+            keywords: keywords 
+          }));
+        }
+        console.log('[NewsFeedTool] Authentication and filters complete.');
+        lastNewsTimestamp = Date.now();
+        startDataGapMonitor();
+        // Start ping keep-alive
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = setInterval(() => {
+          if (ws.readyState === WebSocket.OPEN) {
+            ws.send('ping');
+          }
+        }, 20000);
+        resolve(ws);
+      };
 
-    socket.onmessage = (event) => {
-      console.log('[NewsFeedTool] Message from news feed:', event.data);
-      // Handle incoming messages here (if needed)
-    };
+      ws.onmessage = (event) => {
+        lastNewsTimestamp = Date.now();
+        // Heartbeat/keep-alive handling
+        if (event.data === 'pong') {
+          console.log('[NewsFeedTool] Received pong from server');
+          return;
+        }
+        try {
+          const data = JSON.parse(event.data);
+          if (data && data.server_time) {
+            // Server heartbeat message
+            // Optionally log or update lastNewsTimestamp
+            return;
+          }
+          let newsTimestamp = null;
+          if (data.timestamp) {
+            // Assume 'timestamp' is UNIX timestamp in seconds or ms
+            newsTimestamp = data.timestamp > 1e12 ? data.timestamp : data.timestamp * 1000;
+          }
+          if (newsTimestamp && (Date.now() - newsTimestamp > STALE_NEWS_THRESHOLD_MS)) {
+            console.warn(`[NewsFeedTool] Stale news received (age: ${((Date.now() - newsTimestamp)/1000).toFixed(1)}s), discarding:`, data);
+            return;
+          }
+          console.log('[NewsFeedTool] Message from news feed:', data);
+        } catch (e) {
+          console.log('[NewsFeedTool] Non-JSON message from news feed:', event.data);
+        }
+      };
 
-    socket.onerror = (error) => {
-      console.error('[NewsFeedTool] WebSocket error:', error);
-      reject(new Error('WebSocket connection error.'));
-    };
+      ws.onerror = (error) => {
+        console.error('[NewsFeedTool] WebSocket error:', error.message);
+        ws.close();
+      };
 
-    socket.onclose = (event) => {
-      console.log('[NewsFeedTool] WebSocket closed:', event);
-    };
+      ws.onclose = (event) => {
+        stopDataGapMonitor();
+        if (pingInterval) clearInterval(pingInterval);
+        pingInterval = null;
+        if (!shouldReconnect) return;
+        console.log(`[NewsFeedTool] WebSocket closed (code: ${event.code}, reason: ${event.reason}). Reconnecting in ${reconnectDelay / 1000}s...`);
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+          connect();
+        }, reconnectDelay);
+      };
+    }
+
+    connect();
   });
 };
 
