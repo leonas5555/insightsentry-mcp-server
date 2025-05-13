@@ -6,6 +6,11 @@
  * @param {string} params.websocketKey - WebSocket API key (required, distinct from REST API key)
  * @returns {Promise<WebSocket>} - A promise that resolves with the WebSocket connection
  */
+const INITIAL_RECONNECT_DELAY = 2000; // 2 seconds
+const MAX_RECONNECT_DELAY = 10000; // 10 seconds
+const STALE_DATA_THRESHOLD_MS = 10000; // 10 seconds
+const DATA_GAP_ALERT_THRESHOLD_MS = 15000; // 15 seconds
+
 const executeFunction = async (params = {}) => {
   const wsUrl = 'wss://realtime.insightsentry.com/live';
   const { subscriptions, websocketKey } = params;
@@ -17,57 +22,100 @@ const executeFunction = async (params = {}) => {
     return Promise.reject(new Error('websocketKey parameter is required for real-time data stream.'));
   }
 
-  return new Promise((resolve, reject) => {
-    const socket = new WebSocket(wsUrl);
+  let ws;
+  let reconnectDelay = INITIAL_RECONNECT_DELAY;
+  let shouldReconnect = true;
+  let lastDataTimestamp = Date.now();
+  let dataGapInterval = null;
 
-    socket.onopen = () => {
-      console.log(`[RealTimeDataTool] WebSocket connection established. Subscribing...`);
-      // Send authentication message upon connection
-      socket.send(
-        JSON.stringify({
-          type: 'auth',
-          api_key: websocketKey
-        })
-      );
-
-      // Send unified subscriptions message
-      const subscriptionMessage = {
-        api_key: websocketKey,
-        subscriptions: subscriptions
-      };
-      socket.send(JSON.stringify(subscriptionMessage));
-      console.log(`[RealTimeDataTool] Subscriptions message sent:`, subscriptionMessage);
-
-      // Resolve with the socket instance
-      resolve(socket);
-    };
-
-    socket.onmessage = (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        if (data.series) {
-          // Bar series response
-          console.log(`[RealTimeDataTool] Bar series:`, data);
-        } else if (data.last_price !== undefined) {
-          // Quote response
-          console.log(`[RealTimeDataTool] Quote:`, data);
-        } else {
-          // Other message
-          console.log(`[RealTimeDataTool] Message:`, data);
-        }
-      } catch (e) {
-        console.log(`[RealTimeDataTool] Non-JSON message:`, event.data);
+  function startDataGapMonitor() {
+    if (dataGapInterval) clearInterval(dataGapInterval);
+    dataGapInterval = setInterval(() => {
+      const now = Date.now();
+      if (now - lastDataTimestamp > DATA_GAP_ALERT_THRESHOLD_MS) {
+        console.warn(`[RealTimeDataTool] WARNING: No data received for over ${DATA_GAP_ALERT_THRESHOLD_MS / 1000}s! Possible data gap.`);
       }
-    };
+    }, 2000);
+  }
 
-    socket.onerror = (error) => {
-      console.error(`[RealTimeDataTool] WebSocket error:`, error);
-      reject(error);
-    };
+  function stopDataGapMonitor() {
+    if (dataGapInterval) {
+      clearInterval(dataGapInterval);
+      dataGapInterval = null;
+    }
+  }
 
-    socket.onclose = () => {
-      console.log(`[RealTimeDataTool] WebSocket connection closed.`);
-    };
+  return new Promise((resolve, reject) => {
+    function connect() {
+      ws = new WebSocket(wsUrl);
+
+      ws.onopen = () => {
+        console.log(`[RealTimeDataTool] WebSocket connection established. Subscribing...`);
+        reconnectDelay = INITIAL_RECONNECT_DELAY; // Reset delay on successful connect
+        // Send authentication message upon connection
+        ws.send(
+          JSON.stringify({
+            type: 'auth',
+            api_key: websocketKey
+          })
+        );
+        // Send unified subscriptions message
+        const subscriptionMessage = {
+          api_key: websocketKey,
+          subscriptions: subscriptions
+        };
+        ws.send(JSON.stringify(subscriptionMessage));
+        console.log(`[RealTimeDataTool] Subscriptions message sent:`, subscriptionMessage);
+        lastDataTimestamp = Date.now();
+        startDataGapMonitor();
+        resolve(ws);
+      };
+
+      ws.onmessage = (event) => {
+        lastDataTimestamp = Date.now();
+        try {
+          const data = JSON.parse(event.data);
+          let dataTimestamp = null;
+          if (data.series && data.series.t) {
+            // Bar series: assume 't' is UNIX timestamp in seconds
+            dataTimestamp = data.series.t * 1000;
+          } else if (data.timestamp) {
+            // Quote: assume 'timestamp' is UNIX timestamp in seconds or ms
+            dataTimestamp = data.timestamp > 1e12 ? data.timestamp : data.timestamp * 1000;
+          }
+          if (dataTimestamp && (Date.now() - dataTimestamp > STALE_DATA_THRESHOLD_MS)) {
+            console.warn(`[RealTimeDataTool] Stale data received (age: ${((Date.now() - dataTimestamp)/1000).toFixed(1)}s), discarding:`, data);
+            return;
+          }
+          if (data.series) {
+            console.log(`[RealTimeDataTool] Bar series:`, data);
+          } else if (data.last_price !== undefined) {
+            console.log(`[RealTimeDataTool] Quote:`, data);
+          } else {
+            console.log(`[RealTimeDataTool] Message:`, data);
+          }
+        } catch (e) {
+          console.log(`[RealTimeDataTool] Non-JSON message:`, event.data);
+        }
+      };
+
+      ws.onerror = (error) => {
+        console.error(`[RealTimeDataTool] WebSocket error:`, error.message);
+        ws.close();
+      };
+
+      ws.onclose = (event) => {
+        stopDataGapMonitor();
+        if (!shouldReconnect) return;
+        console.log(`[RealTimeDataTool] WebSocket connection closed (code: ${event.code}, reason: ${event.reason}). Reconnecting in ${reconnectDelay / 1000}s...`);
+        setTimeout(() => {
+          reconnectDelay = Math.min(reconnectDelay * 2, MAX_RECONNECT_DELAY);
+          connect();
+        }, reconnectDelay);
+      };
+    }
+
+    connect();
   });
 };
 
