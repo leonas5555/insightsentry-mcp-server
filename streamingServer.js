@@ -133,7 +133,9 @@ process.on("SIGINT", () => {
   wss.close(() => {
     server.close(() => {
       console.log("[Streaming Server] Shutdown complete.");
-      process.exit(0);
+      if (process.env.JEST_WORKER_ID === undefined) {
+        process.exit(0);
+      }
     });
   });
 }); 
