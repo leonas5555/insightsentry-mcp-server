@@ -1,0 +1,29 @@
+{
+  "code": "NASDAQ:AAPL",
+  "type": "STOCK", 
+  "description": "Apple Inc.",
+  "currency_code": "USD",
+  "country_code": "US",
+  "exchange": "NASDAQ",
+  
+  "trading_context": {
+    "average_volume": 55167445,
+    "regular_close_price": 200.85,
+    "prev_close_price": 199.95,
+    "point_value": 1,
+    "minimum_movement": 1
+  },
+  
+  "session_info": {
+    "open_time": 1748563200,
+    "regular_close_time": 1748649598,
+    "timezone": "America/New_York"
+  },
+  
+  "strategy_context": {
+    "earnings_release_next_date": 1753272000,
+    "option_available": true,
+    "shortable": true,
+    "marginable": true
+  }
+}
