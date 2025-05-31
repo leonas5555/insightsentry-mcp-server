@@ -1,11 +1,11 @@
-import { discoverTools } from "../lib/tools.js";
+import { getAllTools } from "../lib/tools.js";
 
 export function registerToolsCommand(program) {
   program
     .command("tools")
-    .description("List all available API tools")
+    .description("List all available API tools including derived strategy-specific tools")
     .action(async () => {
-      const tools = await discoverTools();
+      const tools = await getAllTools();
       if (tools.length === 0) {
         console.log("No tools found. Tools should be organized as:");
         console.log("tools/workspace/collection/request.js\n");
@@ -30,16 +30,21 @@ export function registerToolsCommand(program) {
 
       // Print tools in a hierarchical structure
       for (const [workspace, collections] of Object.entries(groupedTools)) {
-        console.log(`Workspace: ${workspace}`);
+        console.log(`📁 Workspace: ${workspace}`);
         for (const [collection, tools] of Object.entries(collections)) {
-          console.log(`  Collection: ${collection}`);
+          console.log(`  📂 Collection: ${collection}`);
           tools.forEach(
             ({
               definition: {
                 function: { name, description, parameters },
               },
+              path
             }) => {
-              console.log(`    ${name}`);
+              // Mark derived tools with special indicator
+              const isDerived = path.includes('derived-tools') || path.includes('Tool');
+              const indicator = isDerived ? '🔧' : '⚙️';
+              
+              console.log(`    ${indicator} ${name}`);
               console.log(
                 `      Description: ${description || "No description provided"}`
               );
@@ -55,11 +60,23 @@ export function registerToolsCommand(program) {
                   }
                 );
               }
+              if (isDerived) {
+                console.log(`      Type: Strategy-optimized tool`);
+              }
               console.log("");
             }
           );
         }
         console.log("");
       }
+      
+      // Print summary
+      const derivedCount = tools.filter(t => t.path.includes('derived-tools') || t.path.includes('Tool')).length;
+      const baseCount = tools.length - derivedCount;
+      
+      console.log(`📊 Summary:`);
+      console.log(`   ⚙️  Base tools: ${baseCount}`);
+      console.log(`   🔧 Strategy-optimized tools: ${derivedCount}`);
+      console.log(`   📦 Total tools: ${tools.length}`);
     });
 }
