@@ -66,11 +66,26 @@ const orbTradingContextTool = {
         current_price: rawData.regular_close_price,
         prev_close: rawData.prev_close_price,
         gap_percent: gapPercent,
-        gap_category: classifyGap(gapPercent),
+        gap_analysis: {
+          gap_percent: gapPercent,
+          gap_thresholds: {
+            large_gap: 5.0,
+            medium_gap: 2.0,
+            small_gap: 0.5
+          },
+          gap_classification: classifyGap(gapPercent)
+        },
         
-        // Volume context
-        avg_volume: rawData.average_volume,
-        volume_tier: classifyVolume(rawData.average_volume),
+        volume_analysis: {
+          avg_volume: rawData.average_volume,
+          volume_thresholds: {
+            very_high: 10000000,
+            high: 1000000,
+            medium: 100000,
+            low: 10000
+          },
+          volume_classification: classifyVolume(rawData.average_volume)
+        },
         
         // Session timing
         market_open: rawData.open_time,
@@ -80,8 +95,18 @@ const orbTradingContextTool = {
         ath_distance: rawData.all_time_high ? 
           ((rawData.all_time_high - rawData.regular_close_price) / rawData.all_time_high * 100) : null,
         
-        // Trading suitability
-        orb_suitability: assessOrbSuitability(rawData.average_volume, gapPercent, rawData.market_cap)
+        // ORB strategy criteria (let LLM decide suitability)
+        orb_criteria: {
+          min_volume_threshold: 500000,
+          min_market_cap_threshold: 1000000000, // $1B
+          min_gap_threshold: 0.5, // 0.5%
+          actual_volume: rawData.average_volume,
+          actual_market_cap: rawData.market_cap,
+          actual_gap: gapPercent,
+          volume_meets_threshold: rawData.average_volume > 500000,
+          market_cap_meets_threshold: rawData.market_cap > 1000000000,
+          gap_meets_threshold: !gapPercent || Math.abs(gapPercent) > 0.5
+        }
       }
     };
   },
@@ -145,14 +170,39 @@ const peadTimingTool = {
         pead_window_remaining: peadWindowRemaining,
         pead_stage: determinePeadStage(daysSinceLast),
         
-        // Market context for PEAD
-        market_cap: rawData.market_cap,
-        size_tier: classifyMarketCap(rawData.market_cap),
-        avg_volume: rawData.average_volume,
-        liquidity_tier: classifyLiquidity(rawData.average_volume, rawData.regular_close_price),
+        // Market context with transparent classifications
+        market_context: {
+          market_cap: rawData.market_cap,
+          market_cap_thresholds: {
+            mega_cap: 200000000000,
+            large_cap: 10000000000,
+            mid_cap: 2000000000,
+            small_cap: 300000000
+          },
+          size_classification: classifyMarketCap(rawData.market_cap),
+          
+          avg_volume: rawData.average_volume,
+          dollar_volume: rawData.average_volume * rawData.regular_close_price,
+          liquidity_thresholds: {
+            high: 100000000, // $100M daily
+            medium: 10000000, // $10M daily
+            low: 1000000 // $1M daily
+          },
+          liquidity_classification: classifyLiquidity(rawData.average_volume, rawData.regular_close_price)
+        },
         
-        // Strategy eligibility
-        pead_eligible: assessPeadEligibility(rawData.market_cap, rawData.average_volume, inPeadWindow)
+        // PEAD strategy criteria (let LLM decide eligibility)
+        pead_criteria: {
+          min_market_cap_threshold: 2000000000, // $2B
+          min_volume_threshold: 1000000,
+          max_days_post_earnings: 5,
+          actual_market_cap: rawData.market_cap,
+          actual_volume: rawData.average_volume,
+          actual_days_since_earnings: daysSinceLast,
+          market_cap_meets_threshold: rawData.market_cap > 2000000000,
+          volume_meets_threshold: rawData.average_volume > 1000000,
+          within_drift_window: inPeadWindow
+        }
       }
     };
   },
@@ -196,16 +246,29 @@ const sentimentNewsContextTool = {
         exchange: rawData.code?.split(':')[0] || 'UNKNOWN',
         currency: rawData.currency_code,
         
-        // Size and liquidity for impact assessment
-        market_cap: rawData.market_cap,
-        size_tier: classifyMarketCap(rawData.market_cap),
-        avg_volume: rawData.average_volume,
-        dollar_volume: rawData.average_volume * rawData.regular_close_price,
-        
-        // Valuation context for sentiment weighting
-        current_price: rawData.regular_close_price,
-        pe_ratio: rawData.price_earnings_ttm,
-        valuation_tier: classifyPE(rawData.price_earnings_ttm),
+        // Size and liquidity with transparent thresholds
+        market_analysis: {
+          market_cap: rawData.market_cap,
+          market_cap_thresholds: {
+            mega_cap: 200000000000,
+            large_cap: 10000000000,
+            mid_cap: 2000000000,
+            small_cap: 300000000
+          },
+          size_classification: classifyMarketCap(rawData.market_cap),
+          
+          avg_volume: rawData.average_volume,
+          dollar_volume: rawData.average_volume * rawData.regular_close_price,
+          
+          // Valuation with transparent classification
+          pe_ratio: rawData.price_earnings_ttm,
+          pe_thresholds: {
+            expensive: 40,
+            moderate: 20,
+            reasonable: 12
+          },
+          valuation_classification: classifyPE(rawData.price_earnings_ttm)
+        },
         
         // Volatility context
         ath: rawData.all_time_high,
@@ -213,9 +276,36 @@ const sentimentNewsContextTool = {
         ath_distance_pct: rawData.all_time_high ? 
           ((rawData.all_time_high - rawData.regular_close_price) / rawData.all_time_high * 100) : null,
         
-        // News impact potential
-        news_sensitivity: assessNewsSensitivity(rawData.market_cap, rawData.average_volume, rawData.price_earnings_ttm),
-        sentiment_weight: calculateSentimentWeight(rawData.market_cap, rawData.average_volume)
+        // News impact analysis criteria (let LLM assess sensitivity)
+        news_impact_factors: {
+          market_cap_thresholds: {
+            high_sensitivity: 5000000000, // < $5B
+            low_sensitivity: 100000000000 // > $100B
+          },
+          pe_ratio_thresholds: {
+            growth_stock: 30 // > 30 PE suggests growth stock
+          },
+          volume_thresholds: {
+            low_liquidity: 500000 // < 500k shares = higher impact
+          },
+          actual_values: {
+            market_cap: rawData.market_cap,
+            pe_ratio: rawData.price_earnings_ttm,
+            avg_volume: rawData.average_volume
+          }
+        },
+        
+        // Sentiment weighting factors (transparent calculation)
+        sentiment_weighting_factors: {
+          base_weight: 0.4,
+          small_cap_bonus: rawData.market_cap < 2000000000 ? 0.4 : 0,
+          mid_cap_bonus: rawData.market_cap < 10000000000 && rawData.market_cap >= 2000000000 ? 0.2 : 0,
+          low_liquidity_bonus: (rawData.average_volume * 100) < 5000000 ? 0.3 : 0, // Rough dollar volume
+          calculated_weight: Math.min(1.0, 0.4 + 
+            (rawData.market_cap < 2000000000 ? 0.4 : 0) +
+            (rawData.market_cap < 10000000000 && rawData.market_cap >= 2000000000 ? 0.2 : 0) +
+            ((rawData.average_volume * 100) < 5000000 ? 0.3 : 0))
+        }
       }
     };
   },
@@ -262,33 +352,56 @@ const supervisorRiskTool = {
         avg_volume: rawData.average_volume,
         dollar_volume: dollarVolume,
         
-        // Risk classifications
-        size_tier: classifyMarketCap(rawData.market_cap),
-        liquidity_tier: classifyLiquidity(rawData.average_volume, rawData.regular_close_price),
-        risk_level: assessRiskLevel(rawData.market_cap, dollarVolume),
-        
-        // Position sizing constraints
-        max_position_pct: calculateMaxPositionSize(rawData.market_cap, rawData.average_volume),
-        suggested_shares_limit: calculateSharesLimit(dollarVolume, rawData.regular_close_price),
-        
-        // Trading mechanics
-        point_value: rawData.point_value,
-        min_movement: rawData.minimum_movement,
-        currency: rawData.currency_code,
-        
-        // Volatility flags
-        price_extremes: {
-          ath: rawData.all_time_high,
-          atl: rawData.all_time_low,
-          ath_date: rawData.all_time_high_day,
-          atl_date: rawData.all_time_low_day,
-          current_range_position: calculateRangePosition(rawData.regular_close_price, rawData.all_time_low, rawData.all_time_high)
+        // Risk assessment criteria (transparent thresholds)
+        risk_thresholds: {
+          market_cap: {
+            low_risk: 50000000000, // > $50B
+            medium_risk: 10000000000, // > $10B
+            medium_high_risk: 2000000000 // > $2B
+          },
+          dollar_volume: {
+            low_risk: 50000000, // > $50M daily
+            medium_risk: 10000000, // > $10M daily
+            medium_high_risk: 5000000 // > $5M daily
+          }
         },
         
-        // Strategy constraints
-        orb_approved: assessOrbSuitability(rawData.average_volume, null, rawData.market_cap),
-        pead_approved: assessPeadEligibility(rawData.market_cap, rawData.average_volume, false),
-        sentiment_approved: dollarVolume > 1000000 // Minimum $1M daily volume for news trading
+        // Position sizing criteria (show calculation logic)
+        position_sizing: {
+          base_position_pct: 0.5,
+          large_liquid_bonus: rawData.market_cap > 100000000000 && rawData.average_volume > 10000000 ? 4.5 : 0,
+          mid_large_bonus: rawData.market_cap > 10000000000 && rawData.average_volume > 1000000 ? 2.5 : 0,
+          mid_cap_bonus: rawData.market_cap > 2000000000 && rawData.average_volume > 500000 ? 1.5 : 0,
+          calculated_max_position_pct: Math.max(0.5,
+            0.5 + 
+            (rawData.market_cap > 100000000000 && rawData.average_volume > 10000000 ? 4.5 : 0) +
+            (rawData.market_cap > 10000000000 && rawData.average_volume > 1000000 ? 2.5 : 0) +
+            (rawData.market_cap > 2000000000 && rawData.average_volume > 500000 ? 1.5 : 0)
+          ),
+          max_shares_calculation: {
+            daily_volume_limit_pct: 5, // 5% of daily volume
+            calculated_max_shares: Math.floor((dollarVolume * 0.05) / rawData.regular_close_price)
+          }
+        },
+        
+        // Strategy approval criteria (let LLM decide)
+        strategy_criteria: {
+          orb: {
+            min_volume: 500000,
+            min_market_cap: 1000000000,
+            meets_criteria: rawData.average_volume > 500000 && rawData.market_cap > 1000000000
+          },
+          pead: {
+            min_volume: 1000000,
+            min_market_cap: 2000000000,
+            meets_criteria: rawData.average_volume > 1000000 && rawData.market_cap > 2000000000
+          },
+          sentiment: {
+            min_dollar_volume: 1000000,
+            actual_dollar_volume: dollarVolume,
+            meets_criteria: dollarVolume > 1000000
+          }
+        }
       }
     };
   },
@@ -311,7 +424,7 @@ const supervisorRiskTool = {
   }
 };
 
-// Helper functions
+// Helper functions for transparent classification (showing thresholds to LLM)
 function classifyGap(gapPercent) {
   if (!gapPercent) return 'no_gap';
   const absGap = Math.abs(gapPercent);
@@ -357,81 +470,12 @@ function classifyLiquidity(avgVolume, price) {
   return 'very_low';
 }
 
-function assessOrbSuitability(avgVolume, gapPercent, marketCap) {
-  // ORB works best with liquid stocks that have meaningful gaps
-  const volumeOk = avgVolume && avgVolume > 500000;
-  const capOk = marketCap && marketCap > 1000000000; // > $1B
-  const gapOk = !gapPercent || Math.abs(gapPercent) > 0.5; // Some gap or unknown
-  
-  return volumeOk && capOk && gapOk;
-}
-
 function determinePeadStage(daysSinceLast) {
   if (daysSinceLast === null || daysSinceLast < 0) return 'pre_earnings';
   if (daysSinceLast === 0) return 'earnings_day';
   if (daysSinceLast <= 2) return 'early_drift';
   if (daysSinceLast <= 5) return 'late_drift';
   return 'post_window';
-}
-
-function assessPeadEligibility(marketCap, avgVolume, inWindow) {
-  // PEAD works best with mid-large cap stocks with decent volume
-  const capOk = marketCap && marketCap > 2000000000; // > $2B
-  const volumeOk = avgVolume && avgVolume > 1000000;
-  
-  return capOk && volumeOk;
-}
-
-function assessNewsSensitivity(marketCap, avgVolume, peRatio) {
-  // Smaller, growth stocks tend to be more news-sensitive
-  let sensitivity = 'medium';
-  
-  if (marketCap && marketCap < 5000000000) sensitivity = 'high'; // < $5B
-  if (peRatio && peRatio > 30) sensitivity = 'high'; // Growth stocks
-  if (avgVolume && avgVolume < 500000) sensitivity = 'very_high'; // Low volume = high impact
-  
-  if (marketCap && marketCap > 100000000000) sensitivity = 'low'; // Mega caps less sensitive
-  
-  return sensitivity;
-}
-
-function calculateSentimentWeight(marketCap, avgVolume) {
-  // Weight based on how much news typically moves the stock
-  const dollarVolume = avgVolume * 100; // Rough price estimate
-  
-  if (marketCap && marketCap < 2000000000) return 0.8; // Small caps: high weight
-  if (marketCap && marketCap < 10000000000) return 0.6; // Mid caps: medium weight
-  if (dollarVolume && dollarVolume < 5000000) return 0.7; // Low liquidity: higher weight
-  
-  return 0.4; // Large caps: lower weight
-}
-
-function assessRiskLevel(marketCap, dollarVolume) {
-  if (!marketCap || !dollarVolume) return 'high';
-  
-  if (marketCap > 50000000000 && dollarVolume > 50000000) return 'low';
-  if (marketCap > 10000000000 && dollarVolume > 10000000) return 'medium';
-  if (marketCap > 2000000000 && dollarVolume > 5000000) return 'medium_high';
-  
-  return 'high';
-}
-
-function calculateMaxPositionSize(marketCap, avgVolume) {
-  if (!marketCap || !avgVolume) return 0.5;
-  
-  // Conservative position sizing based on liquidity
-  if (marketCap > 100000000000 && avgVolume > 10000000) return 5.0;  // Large, liquid
-  if (marketCap > 10000000000 && avgVolume > 1000000) return 3.0;    // Mid-large
-  if (marketCap > 2000000000 && avgVolume > 500000) return 2.0;      // Mid cap
-  return 1.0; // Small/illiquid
-}
-
-function calculateSharesLimit(dollarVolume, price) {
-  if (!dollarVolume || !price) return 1000;
-  
-  // Limit to 5% of daily volume in shares
-  const maxDollarPosition = dollarVolume * 0.05;
-  return Math.floor(maxDollarPosition / price);
 }
 
 function calculateRangePosition(currentPrice, atl, ath) {
