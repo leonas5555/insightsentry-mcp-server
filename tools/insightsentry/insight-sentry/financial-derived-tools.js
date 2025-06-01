@@ -83,29 +83,22 @@ const marketCapScreeningTool = {
     const company = rawData.data.company_info || {};
     const valuation = rawData.data.valuation_ratios || {};
     
-    // Calculate approximate market cap from shares outstanding
-    const sharesOutstanding = income.basic_shares_outstanding_fq || income.basic_shares_outstanding_fy;
-    
     return {
       symbol: rawData.code,
       last_update: rawData.last_update,
       screening: {
-        shares_outstanding: sharesOutstanding,
-        estimated_market_cap: null, // Will be calculated with current price
+        shares_outstanding: income.basic_shares_outstanding_fq || income.basic_shares_outstanding_fy,
         sector: company.sector,
         industry: company.industry,
         employees: company.number_of_employees,
         
-        // Quick screening ratios
+        // Valuation ratios (raw data for agent analysis)
         pe_ratio: valuation.price_earnings,
         pb_ratio: valuation.price_book_ratio,
         
-        // Earnings for trend analysis
+        // Earnings data (raw for agent analysis)
         latest_eps: income.earnings_per_share_diluted_fq,
-        annual_eps: income.earnings_per_share_diluted_fy,
-        
-        // Basic size classification
-        size_category: classifyCompanySize(company.number_of_employees, sharesOutstanding)
+        annual_eps: income.earnings_per_share_diluted_fy
       }
     };
   },
@@ -153,17 +146,9 @@ const earningsSurpriseTool = {
         latest_eps: income.earnings_per_share_diluted_fq,
         latest_revenue: income.revenue_fq,
         
-        // Historical for trend analysis
+        // Historical for trend analysis (raw data for agent to analyze)
         eps_quarterly_history: epsQuarterly,
         revenue_quarterly_history: revenueQuarterly,
-        
-        // Year-over-year growth
-        eps_yoy_growth: calculateYoYGrowth(epsQuarterly),
-        revenue_yoy_growth: calculateYoYGrowth(revenueQuarterly),
-        
-        // Sequential growth (QoQ)
-        eps_qoq_growth: calculateQoQGrowth(epsQuarterly),
-        revenue_qoq_growth: calculateQoQGrowth(revenueQuarterly),
         
         // Context
         sector: company.sector,
@@ -205,36 +190,23 @@ const financialHealthFlagsTool = {
     const income = rawData.data.income_statement || {};
     const company = rawData.data.company_info || {};
     
-    // Calculate financial health flags
-    const flags = {
-      high_debt: (balance.total_debt_to_equity_fq || 0) > 2.0,
-      low_liquidity: (balance.current_ratio_fq || 0) < 1.0,
-      negative_margins: (profitability.operating_margin_current || 0) < 0,
-      declining_revenue: checkRevenueDecline(income.revenue_fq_h || []),
-      high_valuation: (profitability.price_earnings || 0) > 50,
-      low_roe: (profitability.return_on_equity_current || 0) < 0.1
-    };
-    
-    const flagCount = Object.values(flags).filter(Boolean).length;
-    
     return {
       symbol: rawData.code,
       last_update: rawData.last_update,
-      health_assessment: {
-        flags,
-        total_red_flags: flagCount,
-        risk_level: classifyRiskLevel(flagCount),
-        
-        // Key metrics for context
+      health_metrics: {
+        // Raw financial metrics for agent analysis
         debt_to_equity: balance.total_debt_to_equity_fq,
         current_ratio: balance.current_ratio_fq,
         operating_margin: profitability.operating_margin_current,
         pe_ratio: profitability.price_earnings,
         roe: profitability.return_on_equity_current,
         
+        // Revenue history for trend analysis
+        revenue_quarterly_history: (income.revenue_fq_h || []).slice(0, 4),
+        
         // Company context
         sector: company.sector,
-        size: company.number_of_employees
+        employees: company.number_of_employees
       }
     };
   },
@@ -286,11 +258,7 @@ const sentimentContextTool = {
         // Valuation context for sentiment interpretation
         pe_ratio: valuation.price_earnings,
         pb_ratio: valuation.price_book_ratio,
-        price_sales: valuation.price_sales_ratio,
-        
-        // Classification for sentiment weighting
-        valuation_tier: classifyValuationTier(valuation),
-        size_tier: classifyCompanySize(company.number_of_employees)
+        price_sales: valuation.price_sales_ratio
       }
     };
   },
@@ -312,54 +280,6 @@ const sentimentContextTool = {
     }
   }
 };
-
-// Helper functions
-function classifyCompanySize(employees, sharesOutstanding = null) {
-  if (employees > 100000) return 'mega_cap';
-  if (employees > 10000) return 'large_cap';
-  if (employees > 1000) return 'mid_cap';
-  return 'small_cap';
-}
-
-function classifyValuationTier(valuation) {
-  const pe = valuation.price_earnings || 0;
-  if (pe > 40) return 'expensive';
-  if (pe > 20) return 'moderate';
-  if (pe > 10) return 'cheap';
-  return 'value';
-}
-
-function classifyRiskLevel(flagCount) {
-  if (flagCount >= 4) return 'high';
-  if (flagCount >= 2) return 'medium';
-  return 'low';
-}
-
-function calculateYoYGrowth(quarterly) {
-  if (quarterly.length < 4) return null;
-  const current = quarterly[0];
-  const yearAgo = quarterly[4];
-  if (!current || !yearAgo || yearAgo === 0) return null;
-  return (current - yearAgo) / Math.abs(yearAgo);
-}
-
-function calculateQoQGrowth(quarterly) {
-  if (quarterly.length < 2) return null;
-  const current = quarterly[0];
-  const previous = quarterly[1];
-  if (!current || !previous || previous === 0) return null;
-  return (current - previous) / Math.abs(previous);
-}
-
-function checkRevenueDecline(revenueHistory) {
-  if (revenueHistory.length < 3) return false;
-  // Check if revenue declined in 2 of last 3 quarters
-  let declines = 0;
-  for (let i = 0; i < 2; i++) {
-    if (revenueHistory[i] < revenueHistory[i + 1]) declines++;
-  }
-  return declines >= 2;
-}
 
 export { 
   marketCapScreeningTool,
