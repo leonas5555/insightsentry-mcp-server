@@ -49,7 +49,8 @@ const executeFunction = async ({ symbol, sections = null, optimize = false, mini
 };
 
 /**
- * Tool configuration for retrieving symbol information from InsightSentry.
+ * Tool configuration for retrieving comprehensive symbol information from InsightSentry.
+ * Provides raw market data, fundamentals, trading context, and session information.
  * @type {Object}
  */
 const apiTool = {
@@ -58,13 +59,30 @@ const apiTool = {
     type: 'function',
     function: {
       name: 'get_symbol_info',
-      description: 'Retrieve information about a specific symbol from InsightSentry.',
+      description: 'Retrieve comprehensive market information about any tradeable symbol including stocks, ETFs, indices, forex, cryptocurrencies, and commodities. Returns real-time market data, fundamentals, trading context, earnings data, and technical indicators.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The symbol code for which to retrieve information (e.g., "NASDAQ:AAPL").'
+            description: 'Symbol code in EXCHANGE:TICKER format. Examples: "NASDAQ:AAPL" (Apple stock), "NYSE:MSFT" (Microsoft), "BINANCE:BTCUSDT" (Bitcoin), "FOREXCOM:EURUSD" (Euro/USD), "COMEX:GC1!" (Gold futures), "CURRENCYCOM:US500" (S&P 500 index). Always include the exchange prefix.',
+            pattern: '^[A-Z]+:[A-Z0-9!]+$'
+          },
+          sections: {
+            type: 'array',
+            items: {
+              type: 'string',
+              enum: ['trading_context', 'session_info', 'strategy_context', 'fundamentals', 'extremes']
+            },
+            description: 'Optional: Specific data sections to retrieve. If omitted, returns all available data. Available sections: trading_context (prices, volume, point values), session_info (market hours), strategy_context (earnings dates), fundamentals (financials, ratios), extremes (all-time highs/lows).'
+          },
+          optimize: {
+            type: 'boolean',
+            description: 'Optional: If true, removes options data to reduce payload size. Default: false.'
+          },
+          minimal: {
+            type: 'boolean',
+            description: 'Optional: If true, returns only essential trading data (price, volume, session times). Default: false.'
           }
         },
         required: ['symbol']
@@ -202,28 +220,28 @@ const optimizeSymbolData = (rawData, options = {}) => {
 };
 
 /**
- * Extract trading essentials for ORB and intraday strategies
+ * Extract trading essentials for intraday and breakout strategies
+ * Returns raw trading data without strategy-specific calculations
  */
 const extractTradingEssentials = (rawData) => {
   if (!rawData) return rawData;
   
   return {
     symbol: rawData.code,
-    trading: {
+    last_update: new Date().toISOString(),
+    trading_data: {
       exchange: rawData.code?.split(':')[0] || 'UNKNOWN',
       currency: rawData.currency_code,
       type: rawData.type,
       average_volume: rawData.average_volume,
       current_price: rawData.regular_close_price,
       prev_close: rawData.prev_close_price,
-      gap_percent: rawData.prev_close_price ? 
+      price_change: rawData.regular_close_price && rawData.prev_close_price ? 
+        rawData.regular_close_price - rawData.prev_close_price : null,
+      price_change_percent: rawData.prev_close_price ? 
         ((rawData.regular_close_price - rawData.prev_close_price) / rawData.prev_close_price * 100) : null,
-      
-      // Trading mechanics
       point_value: rawData.point_value,
       min_movement: rawData.minimum_movement,
-      
-      // Session timing
       market_open: rawData.open_time,
       market_close: rawData.regular_close_time
     }
@@ -231,7 +249,8 @@ const extractTradingEssentials = (rawData) => {
 };
 
 /**
- * Extract earnings timing for PEAD strategy
+ * Extract earnings timing data for earnings-based strategies
+ * Returns raw earnings dates without strategy-specific window calculations
  */
 const extractEarningsTiming = (rawData) => {
   if (!rawData) return rawData;
@@ -241,130 +260,85 @@ const extractEarningsTiming = (rawData) => {
   
   return {
     symbol: rawData.code,
-    earnings: {
-      next_announcement: nextEarnings,
-      last_announcement: lastEarnings,
+    last_update: new Date().toISOString(),
+    earnings_data: {
+      next_earnings_date: nextEarnings,
+      last_earnings_date: lastEarnings,
+      market_cap: rawData.market_cap,
+      avg_volume: rawData.average_volume,
+      current_price: rawData.regular_close_price,
+      // Let LLM calculate time windows based on strategy needs
       days_to_next: nextEarnings ? Math.ceil((nextEarnings * 1000 - Date.now()) / (1000 * 60 * 60 * 24)) : null,
-      days_since_last: lastEarnings ? Math.ceil((Date.now() - lastEarnings * 1000) / (1000 * 60 * 60 * 24)) : null,
-      
-      // PEAD window calculations
-      in_pead_window: lastEarnings ? 
-        (Date.now() - lastEarnings * 1000) < (5 * 24 * 60 * 60 * 1000) : false, // 5 days post-earnings
-      pead_window_remaining: lastEarnings ? 
-        Math.max(0, 5 - Math.ceil((Date.now() - lastEarnings * 1000) / (1000 * 60 * 60 * 24))) : 0
+      days_since_last: lastEarnings ? Math.ceil((Date.now() - lastEarnings * 1000) / (1000 * 60 * 60 * 24)) : null
     }
   };
 };
 
 /**
- * Extract sentiment context for news analysis
+ * Extract fundamental context for news and sentiment analysis
+ * Returns raw fundamental data without predefined classifications
  */
 const extractSentimentContext = (rawData) => {
   if (!rawData) return rawData;
   
   return {
     symbol: rawData.code,
-    context: {
+    last_update: new Date().toISOString(),
+    fundamental_data: {
       description: rawData.description,
       exchange: rawData.code?.split(':')[0] || 'UNKNOWN',
       currency: rawData.currency_code,
-      
-      // Size indicators
       market_cap: rawData.market_cap,
       avg_volume: rawData.average_volume,
-      size_tier: classifyMarketCap(rawData.market_cap),
-      
-      // Valuation context
       current_price: rawData.regular_close_price,
       pe_ratio: rawData.price_earnings_ttm,
-      valuation_tier: classifyPE(rawData.price_earnings_ttm),
-      
-      // Volatility indicators
-      ath: rawData.all_time_high,
-      distance_from_ath: rawData.all_time_high ? 
-        ((rawData.all_time_high - rawData.regular_close_price) / rawData.all_time_high * 100) : null
+      all_time_high: rawData.all_time_high,
+      all_time_low: rawData.all_time_low,
+      // Raw percentage calculation for LLM to interpret
+      distance_from_ath_percent: rawData.all_time_high ? 
+        ((rawData.all_time_high - rawData.regular_close_price) / rawData.all_time_high * 100) : null,
+      distance_from_atl_percent: rawData.all_time_low ? 
+        ((rawData.regular_close_price - rawData.all_time_low) / rawData.all_time_low * 100) : null
     }
   };
 };
 
 /**
- * Extract risk management data for supervisor
+ * Extract risk assessment data for position sizing and constraints
+ * Returns raw data for LLM to calculate risk parameters based on strategy
  */
 const extractRiskManagement = (rawData) => {
   if (!rawData) return rawData;
   
   return {
     symbol: rawData.code,
-    risk: {
+    last_update: new Date().toISOString(),
+    risk_data: {
       market_cap: rawData.market_cap,
       avg_volume: rawData.average_volume,
       current_price: rawData.regular_close_price,
-      
-      // Liquidity assessment
-      liquidity_tier: classifyLiquidity(rawData.average_volume, rawData.regular_close_price),
-      
-      // Volatility indicators
-      price_range: {
-        ath: rawData.all_time_high,
-        atl: rawData.all_time_low,
+      daily_dollar_volume: rawData.average_volume && rawData.regular_close_price ? 
+        rawData.average_volume * rawData.regular_close_price : null,
+      price_extremes: {
+        all_time_high: rawData.all_time_high,
+        all_time_low: rawData.all_time_low,
         ath_date: rawData.all_time_high_day,
         atl_date: rawData.all_time_low_day
       },
-      
-      // Position sizing hints
-      suggested_max_position_pct: calculateMaxPositionSize(rawData.market_cap, rawData.average_volume),
-      
-      // Trading constraints
-      point_value: rawData.point_value,
-      min_movement: rawData.minimum_movement
+      trading_mechanics: {
+        point_value: rawData.point_value,
+        min_movement: rawData.minimum_movement
+      }
     }
   };
 };
 
-// Helper functions
-function classifyMarketCap(marketCap) {
-  if (!marketCap) return 'unknown';
-  if (marketCap > 200000000000) return 'mega_cap';    // > $200B
-  if (marketCap > 10000000000) return 'large_cap';    // > $10B
-  if (marketCap > 2000000000) return 'mid_cap';       // > $2B
-  if (marketCap > 300000000) return 'small_cap';      // > $300M
-  return 'micro_cap';
-}
-
-function classifyPE(peRatio) {
-  if (!peRatio || peRatio <= 0) return 'unknown';
-  if (peRatio > 40) return 'expensive';
-  if (peRatio > 20) return 'moderate';
-  if (peRatio > 12) return 'reasonable';
-  return 'cheap';
-}
-
-function classifyLiquidity(avgVolume, price) {
-  if (!avgVolume || !price) return 'unknown';
-  const dollarVolume = avgVolume * price;
-  
-  if (dollarVolume > 100000000) return 'high';        // > $100M daily
-  if (dollarVolume > 10000000) return 'medium';       // > $10M daily
-  if (dollarVolume > 1000000) return 'low';           // > $1M daily
-  return 'very_low';
-}
-
-function calculateMaxPositionSize(marketCap, avgVolume) {
-  if (!marketCap || !avgVolume) return 0.5;
-  
-  // Conservative position sizing based on liquidity
-  if (marketCap > 100000000000 && avgVolume > 10000000) return 5.0;  // Large, liquid
-  if (marketCap > 10000000000 && avgVolume > 1000000) return 3.0;    // Mid-large
-  if (marketCap > 2000000000 && avgVolume > 500000) return 2.0;      // Mid cap
-  return 1.0; // Small/illiquid
-}
-
 export { 
   apiTool,
-  orbEssentialsTool,
-  peadEssentialsTool,
-  sentimentEssentialsTool,
-  riskManagementTool,
+  tradingEssentialsTool,
+  earningsTimingTool,
+  fundamentalContextTool,
+  riskAssessmentTool,
   sessionInfoTool,
   optimizeSymbolData,
   extractTradingEssentials,
@@ -374,10 +348,10 @@ export {
 };
 
 /**
- * Tool for ORB strategy - trading essentials only
+ * Tool for retrieving essential trading data for intraday and breakout strategies
  * @type {Object}
  */
-const orbEssentialsTool = {
+const tradingEssentialsTool = {
   function: async (args) => {
     const rawData = await executeFunction({ ...args, sections: ['trading_context', 'session_info'] });
     return extractTradingEssentials(rawData);
@@ -385,14 +359,15 @@ const orbEssentialsTool = {
   definition: {
     type: 'function',
     function: {
-      name: 'fetch_orb_essentials',
-      description: 'Fetch essential trading data optimized for ORB (Opening Range Breakout) strategy.',
+      name: 'fetch_trading_essentials',
+      description: 'Retrieve essential trading data including current price, volume, price changes, trading mechanics, and market session information. Optimized for intraday trading, breakout strategies, and opening range analysis. Returns raw price and volume data without predefined strategy calculations.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch ORB-essential data for.'
+            description: 'Symbol code in EXCHANGE:TICKER format. Examples: "NASDAQ:AAPL", "NYSE:TSLA", "BINANCE:BTCUSDT". Always include exchange prefix.',
+            pattern: '^[A-Z]+:[A-Z0-9!]+$'
           }
         },
         required: ['symbol']
@@ -402,10 +377,10 @@ const orbEssentialsTool = {
 };
 
 /**
- * Tool for PEAD strategy - earnings timing context
+ * Tool for retrieving earnings timing data for earnings-based strategies
  * @type {Object}
  */
-const peadEssentialsTool = {
+const earningsTimingTool = {
   function: async (args) => {
     const rawData = await executeFunction({ ...args, sections: ['strategy_context', 'fundamentals'] });
     return extractEarningsTiming(rawData);
@@ -413,14 +388,15 @@ const peadEssentialsTool = {
   definition: {
     type: 'function',
     function: {
-      name: 'fetch_pead_essentials',
-      description: 'Fetch earnings timing data optimized for PEAD (Post-Earnings Announcement Drift) strategy.',
+      name: 'fetch_earnings_timing',
+      description: 'Retrieve earnings announcement dates and timing data for earnings-based trading strategies. Includes next and previous earnings dates, market cap, and volume context. Useful for Post-Earnings Announcement Drift (PEAD), earnings momentum, and pre-earnings positioning strategies.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch PEAD-essential data for.'
+            description: 'Symbol code in EXCHANGE:TICKER format for stocks with earnings data. Examples: "NASDAQ:AAPL", "NYSE:MSFT", "NASDAQ:GOOGL". Must be a stock symbol, not applicable to forex, crypto, or commodities.',
+            pattern: '^[A-Z]+:[A-Z0-9]+$'
           }
         },
         required: ['symbol']
@@ -430,10 +406,10 @@ const peadEssentialsTool = {
 };
 
 /**
- * Tool for sentiment strategy - news analysis context
+ * Tool for retrieving fundamental context for news and sentiment analysis
  * @type {Object}
  */
-const sentimentEssentialsTool = {
+const fundamentalContextTool = {
   function: async (args) => {
     const rawData = await executeFunction({ ...args, sections: ['fundamentals', 'extremes'] });
     return extractSentimentContext(rawData);
@@ -441,14 +417,15 @@ const sentimentEssentialsTool = {
   definition: {
     type: 'function',
     function: {
-      name: 'fetch_sentiment_essentials',
-      description: 'Fetch sentiment analysis context for news-based trading strategies.',
+      name: 'fetch_fundamental_context',
+      description: 'Retrieve fundamental data and valuation context for news sentiment analysis and impact assessment. Includes market cap, P/E ratio, price extremes, and company description. Essential for evaluating how news might affect stock price based on company size, valuation, and current price positioning.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch sentiment context for.'
+            description: 'Symbol code in EXCHANGE:TICKER format for stocks or ETFs with fundamental data. Examples: "NASDAQ:AAPL", "NYSE:JPM", "NASDAQ:QQQ". Primarily for stocks and equity ETFs.',
+            pattern: '^[A-Z]+:[A-Z0-9]+$'
           }
         },
         required: ['symbol']
@@ -458,10 +435,10 @@ const sentimentEssentialsTool = {
 };
 
 /**
- * Tool for supervisor risk management
+ * Tool for retrieving risk assessment data for position sizing and constraints
  * @type {Object}
  */
-const riskManagementTool = {
+const riskAssessmentTool = {
   function: async (args) => {
     const rawData = await executeFunction({ ...args, sections: ['trading_context', 'fundamentals', 'extremes'] });
     return extractRiskManagement(rawData);
@@ -469,14 +446,15 @@ const riskManagementTool = {
   definition: {
     type: 'function',
     function: {
-      name: 'fetch_risk_management_data',
-      description: 'Fetch risk management data for position sizing and trading constraints.',
+      name: 'fetch_risk_assessment',
+      description: 'Retrieve risk assessment data for position sizing, liquidity analysis, and trading constraints. Includes market cap, volume, price extremes, and trading mechanics. Essential for calculating position sizes, assessing liquidity, and understanding price volatility ranges across any tradeable instrument.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch risk management data for.'
+            description: 'Symbol code in EXCHANGE:TICKER format for any tradeable instrument. Examples: "NASDAQ:AAPL" (stock), "BINANCE:BTCUSDT" (crypto), "FOREXCOM:EURUSD" (forex), "COMEX:GC1!" (futures). Risk assessment applies to all asset classes.',
+            pattern: '^[A-Z]+:[A-Z0-9!]+$'
           }
         },
         required: ['symbol']
@@ -486,7 +464,7 @@ const riskManagementTool = {
 };
 
 /**
- * Tool for session information - market timing
+ * Tool for retrieving market session information and trading schedules
  * @type {Object}
  */
 const sessionInfoTool = {
@@ -499,12 +477,13 @@ const sessionInfoTool = {
     
     return {
       symbol: rawData.code,
-      session: {
+      last_update: new Date().toISOString(),
+      session_data: {
         market_open: rawData.open_time,
         market_close: rawData.regular_close_time,
         exchange: rawData.code?.split(':')[0] || 'UNKNOWN',
         currency: rawData.currency_code,
-        type: rawData.type
+        instrument_type: rawData.type
       }
     };
   },
@@ -512,13 +491,14 @@ const sessionInfoTool = {
     type: 'function',
     function: {
       name: 'fetch_session_info',
-      description: 'Fetch market session information for trading timing and schedule management.',
+      description: 'Retrieve market session information including trading hours, exchange details, and scheduling data. Essential for timing trades, understanding market availability, and coordinating strategy execution across different time zones and markets.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch session information for.'
+            description: 'Symbol code in EXCHANGE:TICKER format for any tradeable instrument. Examples: "NASDAQ:AAPL" (US stock market hours), "BINANCE:BTCUSDT" (24/7 crypto), "FOREXCOM:EURUSD" (forex hours), "LSE:TSLA" (London hours). Different exchanges have different session times.',
+            pattern: '^[A-Z]+:[A-Z0-9!]+$'
           }
         },
         required: ['symbol']
