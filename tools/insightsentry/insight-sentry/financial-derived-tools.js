@@ -74,8 +74,12 @@ const optimizeFinancialData = (rawData, options = {}) => {
  * Used by: Supervisor for position sizing, PEAD for market cap filters
  */
 const marketCapScreeningTool = {
-  function: async ({ symbol }) => {
-    const rawData = await executeFunction({ symbol, optimize: true, quarters_limit: 1 });
+  function: async ({ symbol, include_valuation_context = true, position_sizing_focus = false }) => {
+    const rawData = await executeFunction({ 
+      symbol, 
+      optimize: true, 
+      quarters_limit: include_valuation_context ? 4 : 1 
+    });
     
     if (!rawData?.data) return rawData;
     
@@ -98,7 +102,13 @@ const marketCapScreeningTool = {
         
         // Earnings data (raw for agent analysis)
         latest_eps: income.earnings_per_share_diluted_fq,
-        annual_eps: income.earnings_per_share_diluted_fy
+        annual_eps: income.earnings_per_share_diluted_fy,
+        
+        // Additional context if requested
+        ...(include_valuation_context && {
+          revenue_trends: (income.revenue_fq_h || []).slice(0, 4),
+          eps_trends: (income.earnings_per_share_diluted_fq_h || []).slice(0, 4)
+        })
       }
     };
   },
@@ -106,13 +116,24 @@ const marketCapScreeningTool = {
     type: 'function',
     function: {
       name: 'fetch_market_cap_screening',
-      description: 'Fetch market capitalization and basic screening data for position sizing and strategy eligibility.',
+      description: 'Specialized screening tool for position sizing and market cap-based strategy filtering. Returns share count, valuation ratios, and sector classification. Use this when you need to determine position sizes, filter stocks by market cap tiers, or assess strategy eligibility based on company size.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch market cap screening data for.'
+            description: 'Stock ticker symbol with exchange prefix for market cap screening (e.g., "NASDAQ:AAPL"). Best for liquid, established companies with clear share count data.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          include_valuation_context: {
+            type: 'boolean',
+            description: 'Include recent earnings and revenue trends for additional screening context.',
+            default: true
+          },
+          position_sizing_focus: {
+            type: 'boolean',
+            description: 'Optimize response for position sizing calculations by emphasizing share count accuracy.',
+            default: false
           }
         },
         required: ['symbol']
@@ -126,8 +147,12 @@ const marketCapScreeningTool = {
  * Used by: PEAD strategy for post-earnings drift analysis
  */
 const earningsSurpriseTool = {
-  function: async ({ symbol }) => {
-    const rawData = await executeFunction({ symbol, optimize: true, quarters_limit: 8 });
+  function: async ({ symbol, historical_quarters = 8, include_revenue_analysis = true }) => {
+    const rawData = await executeFunction({ 
+      symbol, 
+      optimize: true, 
+      quarters_limit: Math.max(historical_quarters, 8) 
+    });
     
     if (!rawData?.data) return rawData;
     
@@ -135,8 +160,8 @@ const earningsSurpriseTool = {
     const company = rawData.data.company_info || {};
     
     // Get recent quarterly data
-    const epsQuarterly = (income.earnings_per_share_diluted_fq_h || []).slice(0, 8);
-    const revenueQuarterly = (income.revenue_fq_h || []).slice(0, 8);
+    const epsQuarterly = (income.earnings_per_share_diluted_fq_h || []).slice(0, historical_quarters);
+    const revenueQuarterly = include_revenue_analysis ? (income.revenue_fq_h || []).slice(0, historical_quarters) : [];
     
     return {
       symbol: rawData.code,
@@ -148,10 +173,11 @@ const earningsSurpriseTool = {
         
         // Historical for trend analysis (raw data for agent to analyze)
         eps_quarterly_history: epsQuarterly,
-        revenue_quarterly_history: revenueQuarterly,
+        ...(include_revenue_analysis && { revenue_quarterly_history: revenueQuarterly }),
         
         // Context
         sector: company.sector,
+        shares_outstanding: income.basic_shares_outstanding_fq,
         market_cap_estimate: null // To be filled with price data
       }
     };
@@ -160,13 +186,26 @@ const earningsSurpriseTool = {
     type: 'function',
     function: {
       name: 'fetch_earnings_surprise_data',
-      description: 'Fetch earnings and revenue data optimized for PEAD strategy earnings surprise analysis.',
+      description: 'Specialized tool for Post-Earnings Announcement Drift (PEAD) analysis focusing on earnings surprise detection. Returns detailed quarterly EPS history, revenue trends, and sector context. Use this specifically when analyzing stocks after earnings announcements to identify surprise patterns and momentum opportunities.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch earnings surprise data for.'
+            description: 'Stock ticker symbol with exchange prefix for earnings surprise analysis (e.g., "NASDAQ:NVDA"). Most effective for companies with consistent quarterly reporting and analyst coverage.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          historical_quarters: {
+            type: 'number',
+            description: 'Number of historical quarters to analyze for earnings patterns (4-20). More quarters provide better trend analysis but slower response.',
+            default: 8,
+            minimum: 4,
+            maximum: 20
+          },
+          include_revenue_analysis: {
+            type: 'boolean',
+            description: 'Include revenue surprise analysis alongside earnings. Useful for comprehensive surprise assessment.',
+            default: true
           }
         },
         required: ['symbol']
@@ -180,8 +219,12 @@ const earningsSurpriseTool = {
  * Used by: Supervisor for risk management, all strategies for screening
  */
 const financialHealthFlagsTool = {
-  function: async ({ symbol }) => {
-    const rawData = await executeFunction({ symbol, optimize: true, quarters_limit: 4 });
+  function: async ({ symbol, focus_on_debt = true, liquidity_emphasis = false, quarters_for_trends = 4 }) => {
+    const rawData = await executeFunction({ 
+      symbol, 
+      optimize: true, 
+      quarters_limit: Math.max(quarters_for_trends, 4) 
+    });
     
     if (!rawData?.data) return rawData;
     
@@ -189,20 +232,34 @@ const financialHealthFlagsTool = {
     const profitability = rawData.data.profitability || {};
     const income = rawData.data.income_statement || {};
     const company = rawData.data.company_info || {};
+    const cashFlow = rawData.data.cash_flow || {};
     
     return {
       symbol: rawData.code,
       last_update: rawData.last_update,
       health_metrics: {
-        // Raw financial metrics for agent analysis
+        // Core financial health indicators
         debt_to_equity: balance.total_debt_to_equity_fq,
         current_ratio: balance.current_ratio_fq,
         operating_margin: profitability.operating_margin_current,
         pe_ratio: profitability.price_earnings,
         roe: profitability.return_on_equity_current,
         
-        // Revenue history for trend analysis
-        revenue_quarterly_history: (income.revenue_fq_h || []).slice(0, 4),
+        // Additional debt and liquidity metrics if requested
+        ...(focus_on_debt && {
+          total_debt: balance.total_debt_fq,
+          cash_and_equivalents: balance.cash_n_equivalents_fq,
+          interest_coverage: profitability.interest_coverage_ratio
+        }),
+        
+        ...(liquidity_emphasis && {
+          cash_and_short_term: balance.cash_n_short_term_invest_fq,
+          working_capital: balance.working_capital_fq,
+          operating_cash_flow: cashFlow.operating_cash_flow_per_share
+        }),
+        
+        // Revenue trends for deterioration detection
+        revenue_quarterly_history: (income.revenue_fq_h || []).slice(0, quarters_for_trends),
         
         // Company context
         sector: company.sector,
@@ -214,13 +271,31 @@ const financialHealthFlagsTool = {
     type: 'function',
     function: {
       name: 'fetch_financial_health_flags',
-      description: 'Fetch financial health assessment with red flags for risk management and stock screening.',
+      description: 'Comprehensive financial health assessment tool for risk management and red flag detection. Returns debt ratios, liquidity metrics, profitability trends, and cash flow indicators. Use this before making investments to identify potential financial distress, bankruptcy risk, or deteriorating business conditions.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to assess financial health flags for.'
+            description: 'Stock ticker symbol with exchange prefix for financial health assessment (e.g., "NYSE:F", "NYSE:GE"). Most useful for mature companies, cyclical businesses, or stocks with recent performance concerns.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          focus_on_debt: {
+            type: 'boolean',
+            description: 'Include detailed debt analysis including interest coverage and debt composition.',
+            default: true
+          },
+          liquidity_emphasis: {
+            type: 'boolean',
+            description: 'Emphasize short-term liquidity and working capital analysis for immediate financial stress assessment.',
+            default: false
+          },
+          quarters_for_trends: {
+            type: 'number',
+            description: 'Number of quarters to analyze for deteriorating trends (2-8). More quarters show longer-term patterns.',
+            default: 4,
+            minimum: 2,
+            maximum: 8
           }
         },
         required: ['symbol']
@@ -234,10 +309,10 @@ const financialHealthFlagsTool = {
  * Used by: SentimentAgent for valuation context with news
  */
 const sentimentContextTool = {
-  function: async ({ symbol }) => {
+  function: async ({ symbol, include_size_metrics = false, detailed_valuation = false }) => {
     const rawData = await executeFunction({ 
       symbol, 
-      sections: ['company_info', 'valuation_ratios'],
+      sections: ['company_info', 'valuation_ratios', ...(include_size_metrics ? ['income_statement'] : [])],
       optimize: true,
       quarters_limit: 1
     });
@@ -246,6 +321,7 @@ const sentimentContextTool = {
     
     const company = rawData.data.company_info || {};
     const valuation = rawData.data.valuation_ratios || {};
+    const income = rawData.data.income_statement || {};
     
     return {
       symbol: rawData.code,
@@ -258,7 +334,18 @@ const sentimentContextTool = {
         // Valuation context for sentiment interpretation
         pe_ratio: valuation.price_earnings,
         pb_ratio: valuation.price_book_ratio,
-        price_sales: valuation.price_sales_ratio
+        price_sales: valuation.price_sales_ratio,
+        
+        // Optional size and momentum context
+        ...(include_size_metrics && {
+          shares_outstanding: income.basic_shares_outstanding_fq,
+          latest_eps: income.earnings_per_share_diluted_fq
+        }),
+        
+        ...(detailed_valuation && {
+          ev_ebitda: valuation.enterprise_value_ebitda_current,
+          price_cash_flow: valuation.price_cash_flow_ratio
+        })
       }
     };
   },
@@ -266,13 +353,24 @@ const sentimentContextTool = {
     type: 'function',
     function: {
       name: 'fetch_sentiment_context',
-      description: 'Fetch minimal company and valuation context for sentiment analysis strategy.',
+      description: 'Lightweight tool providing company and valuation context for sentiment-driven trading strategies. Returns sector classification, key valuation ratios, and company size metrics. Use this when analyzing news sentiment impact on stock prices or combining fundamental context with sentiment signals.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch sentiment context for.'
+            description: 'Stock ticker symbol with exchange prefix for sentiment context (e.g., "NASDAQ:TSLA", "NASDAQ:AAPL"). Most effective for widely-covered stocks with active news flow and analyst coverage.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          include_size_metrics: {
+            type: 'boolean',
+            description: 'Include market cap indicators (shares outstanding, EPS) for size-based sentiment analysis.',
+            default: false
+          },
+          detailed_valuation: {
+            type: 'boolean',
+            description: 'Include additional valuation ratios (EV/EBITDA, P/CF) for comprehensive sentiment context.',
+            default: false
           }
         },
         required: ['symbol']

@@ -206,28 +206,32 @@ const apiTool = {
     type: 'function',
     function: {
       name: 'fetch_financial_data',
-      description: 'Fetch financial data for a specific stock symbol from InsightSentry with configurable optimization.',
+      description: 'Fetch comprehensive financial data for stock analysis. Use this for custom analysis requiring multiple financial metrics or when other specialized tools don\'t meet your needs. Returns complete financial statements, ratios, and company information.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch financial data for.'
+            description: 'Stock ticker symbol with exchange prefix (e.g., "NASDAQ:AAPL", "NYSE:MSFT"). Must include exchange and be a valid US stock symbol.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
           },
           sections: {
             type: 'array',
             items: { type: 'string' },
-            description: 'Specific sections to extract (e.g., ["valuation_ratios", "profitability"]). If not provided, all sections are returned.'
+            description: 'Specific data sections to extract. Available: ["income_statement", "balance_sheet", "cash_flow", "valuation_ratios", "profitability", "company_info"]. Leave empty for all sections.',
+            enum: ['income_statement', 'balance_sheet', 'cash_flow', 'valuation_ratios', 'profitability', 'company_info']
           },
           optimize: {
             type: 'boolean',
-            description: 'Whether to apply optimization filters to reduce data size by limiting historical arrays.',
-            default: false
+            description: 'Reduce response size by limiting historical data arrays. Recommended for faster responses.',
+            default: true
           },
           quarters_limit: {
             type: 'number',
-            description: 'Limit historical quarterly data to N recent quarters (default: 4).',
-            default: 4
+            description: 'Number of recent quarters to include in historical arrays (1-20). More quarters = more data but slower response.',
+            default: 4,
+            minimum: 1,
+            maximum: 20
           }
         },
         required: ['symbol']
@@ -242,20 +246,30 @@ const apiTool = {
  */
 const peadEssentialsTool = {
   function: async (args) => {
-    const rawData = await executeFunction(args);
+    const rawData = await executeFunction({
+      symbol: args.symbol,
+      optimize: true,
+      quarters_limit: args.include_estimates ? 8 : 4
+    });
     return extractPEADEssentials(rawData);
   },
   definition: {
     type: 'function',
     function: {
       name: 'fetch_pead_essentials',
-      description: 'Fetch essential earnings and revenue data optimized for PEAD (Post-Earnings Announcement Drift) strategy.',
+      description: 'Specialized tool for Post-Earnings Announcement Drift (PEAD) strategy analysis. Returns optimized earnings data including EPS trends, revenue growth, and recent quarterly performance. Use this specifically for earnings surprise analysis and post-earnings momentum trading.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch PEAD-essential data for.'
+            description: 'Stock ticker symbol with exchange prefix for PEAD analysis (e.g., "NASDAQ:AAPL"). Must be a company that reports quarterly earnings.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          include_estimates: {
+            type: 'boolean',
+            description: 'Include analyst estimates for earnings surprise calculation. Useful for more accurate PEAD signals.',
+            default: false
           }
         },
         required: ['symbol']
@@ -270,20 +284,35 @@ const peadEssentialsTool = {
  */
 const valuationRatiosTool = {
   function: async (args) => {
-    const rawData = await executeFunction(args);
+    const rawData = await executeFunction({
+      symbol: args.symbol,
+      optimize: true,
+      quarters_limit: 4
+    });
     return extractValuationRatios(rawData);
   },
   definition: {
     type: 'function',
     function: {
       name: 'fetch_valuation_ratios',
-      description: 'Fetch key valuation ratios and profitability metrics for stock screening and risk assessment.',
+      description: 'Fetch key valuation metrics for stock screening and investment analysis. Returns P/E, P/B, ROE, profit margins, and sector context. Use this for determining if a stock is overvalued/undervalued or for comparative analysis across stocks.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch valuation ratios for.'
+            description: 'Stock ticker symbol with exchange prefix for valuation analysis (e.g., "NASDAQ:MSFT"). Works best with profitable, established companies.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          include_peer_context: {
+            type: 'boolean',
+            description: 'Include sector and industry information for peer comparison context.',
+            default: true
+          },
+          focus_on_growth: {
+            type: 'boolean',
+            description: 'Emphasize growth-oriented metrics like ROE and operating margin trends.',
+            default: false
           }
         },
         required: ['symbol']
@@ -298,20 +327,35 @@ const valuationRatiosTool = {
  */
 const balanceSheetHealthTool = {
   function: async (args) => {
-    const rawData = await executeFunction(args);
+    const rawData = await executeFunction({
+      symbol: args.symbol,
+      optimize: true,
+      quarters_limit: args.debt_analysis ? 4 : 2
+    });
     return extractBalanceSheetHealth(rawData);
   },
   definition: {
     type: 'function',
     function: {
       name: 'fetch_balance_sheet_health',
-      description: 'Fetch balance sheet health metrics including debt ratios, cash position, and financial stability indicators.',
+      description: 'Assess financial stability and bankruptcy risk through balance sheet analysis. Returns debt ratios, cash position, liquidity metrics, and cash flow indicators. Use this for risk management, credit analysis, or before making investments in financially stressed companies.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch balance sheet health data for.'
+            description: 'Stock ticker symbol with exchange prefix for financial health assessment (e.g., "NYSE:F", "NYSE:GE"). Particularly useful for analyzing mature companies or those in cyclical industries.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}$'
+          },
+          focus_on_liquidity: {
+            type: 'boolean',
+            description: 'Emphasize short-term liquidity metrics like current ratio and cash position.',
+            default: false
+          },
+          debt_analysis: {
+            type: 'boolean',
+            description: 'Include detailed debt structure and leverage analysis.',
+            default: true
           }
         },
         required: ['symbol']
@@ -326,7 +370,12 @@ const balanceSheetHealthTool = {
  */
 const companyInfoTool = {
   function: async (args) => {
-    const rawData = await executeFunction(args);
+    const rawData = await executeFunction({
+      symbol: args.symbol,
+      sections: ['company_info'],
+      optimize: true,
+      quarters_limit: 1
+    });
     const company = rawData?.data?.company_info || {};
     
     return {
@@ -341,7 +390,10 @@ const companyInfoTool = {
         employees: company.number_of_employees,
         founded: company.founded,
         website: company.web_site_url,
-        ceo: company.ceo
+        ceo: company.ceo,
+        ...(args.include_business_description && {
+          business_description: company.business_description
+        })
       }
     };
   },
@@ -349,13 +401,24 @@ const companyInfoTool = {
     type: 'function',
     function: {
       name: 'fetch_company_info',
-      description: 'Fetch basic company information including sector, industry, location, and key corporate details.',
+      description: 'Get essential company profile and corporate information. Returns sector classification, geographic location, company size, and key corporate details. Use this for sector analysis, geographic diversification research, or initial company research.',
       parameters: {
         type: 'object',
         properties: {
           symbol: {
             type: 'string',
-            description: 'The stock symbol to fetch company information for.'
+            description: 'Stock ticker symbol with exchange prefix for company information (e.g., "NASDAQ:GOOGL", "NYSE:BRK.B"). Works for any publicly traded US company.',
+            pattern: '^[A-Z]+:[A-Z]{1,5}(\\.?[A-Z])?$'
+          },
+          include_business_description: {
+            type: 'boolean',
+            description: 'Include detailed business description and operations summary.',
+            default: true
+          },
+          focus_on_classification: {
+            type: 'boolean',
+            description: 'Emphasize sector and industry classification for categorization purposes.',
+            default: false
           }
         },
         required: ['symbol']
